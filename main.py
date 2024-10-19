@@ -6,36 +6,44 @@ import os
 import json
 import copy
 
+from clients.oai import generate_localization_object
+import openai  # Make sure openai is installed
+
 class LocalizationEditor(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Localization Editor")
         self.geometry("800x600")
 
-        self.locales_path = "~/WebstormProjects/chatbot-ui/public/locales"
+        self.config_file = 'config.json'
+        self.locales_path = os.path.expanduser("~/WebstormProjects/chatbot-ui/public/locales")
         self.locales = {}
         self.all_files = set()
         self.all_keys = {}
         self.unsaved_changes = False
 
         self.create_widgets()
+        self.load_last_folder()  # Load the last opened folder in prev session on startup
 
     def on_double_click(self, event):
         item = self.table.identify('item', event.x, event.y)
         if item:
             self.edit_value(item)
 
-
     def create_widgets(self):
-        # Menu
         menubar = tk.Menu(self)
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Open Locales Folder", command=self.open_locales_folder)
+        file_menu.add_command(label="Open Locales Folder", command=self.open_locales_folder, accelerator="Ctrl+O")
         file_menu.add_separator()
-        file_menu.add_command(label="Save Changes", command=self.save_changes)
-        file_menu.add_command(label="Exit", command=self.quit)
+        file_menu.add_command(label="Save Changes", command=self.save_changes, accelerator="Ctrl+S")
+        file_menu.add_command(label="Exit", command=self.quit, accelerator="Ctrl+Q")
         menubar.add_cascade(label="File", menu=file_menu)
         self.config(menu=menubar)
+
+        # Bind keyboard shortcuts
+        self.bind_all("<Control-o>", lambda event: self.open_locales_folder())
+        self.bind_all("<Control-s>", lambda event: self.save_changes())
+        self.bind_all("<Control-q>", lambda event: self.quit())
 
         # Frames
         self.left_frame = ttk.Frame(self)
@@ -50,6 +58,7 @@ class LocalizationEditor(tk.Tk):
         self.tree.pack(fill=tk.Y, expand=True)
 
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        self.tree.bind("<Button-3>", self.show_tree_context_menu)  # Right-click context menu
 
         # Buttons
         btn_frame = ttk.Frame(self.left_frame)
@@ -64,6 +73,12 @@ class LocalizationEditor(tk.Tk):
         self.table.pack(fill=tk.BOTH, expand=True)
         self.table.bind("<Double-1>", self.on_double_click)
         self.table.bind("<Configure>", self.on_table_configure)
+        self.table.bind("<Button-3>", self.show_table_context_menu)  # Right-click context menu
+
+        # Keyboard navigation
+        self.table.bind("<Up>", self.on_key_press)
+        self.table.bind("<Down>", self.on_key_press)
+        self.table.bind("<Return>", lambda event: self.edit_value())
 
         # Buttons
         table_btn_frame = ttk.Frame(self.right_frame)
@@ -71,10 +86,26 @@ class LocalizationEditor(tk.Tk):
         self.edit_value_btn = ttk.Button(table_btn_frame, text="Edit Value", command=self.edit_value)
         self.edit_value_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+    def load_last_folder(self):
+        if os.path.exists(self.config_file):
+            with open(self.config_file, 'r') as f:
+                config = json.load(f)
+                last_folder = config.get('last_folder', '')
+                if last_folder and os.path.exists(last_folder):
+                    self.locales_path = last_folder
+                    self.scan_locales()
+                    self.populate_tree()
+
+    def save_last_folder(self):
+        config = {'last_folder': self.locales_path}
+        with open(self.config_file, 'w') as f:
+            json.dump(config, f)
+
     def open_locales_folder(self):
         path = filedialog.askdirectory(title="Select Locales Folder")
         if path:
             self.locales_path = path
+            self.save_last_folder()  # Save the selected folder
             self.scan_locales()
             self.populate_tree()
 
@@ -98,6 +129,7 @@ class LocalizationEditor(tk.Tk):
                             self.locales[locale_dir][file_name] = data
                             for key in data:
                                 self.all_keys.setdefault(key, set()).add(locale_dir)
+
         # Identify missing files and keys
         for locale in self.locales:
             for file_name in self.all_files:
@@ -174,8 +206,6 @@ class LocalizationEditor(tk.Tk):
         # Bind the draw callback
         self.table.bind('<Motion>', self.highlight_cell)
 
-        self.update_statistics(total_keys, empty_keys)
-
     def update_statistics(self, total_keys, empty_keys):
         if hasattr(self, 'stats_label'):
             self.stats_label.destroy()
@@ -191,11 +221,13 @@ class LocalizationEditor(tk.Tk):
         self.stats_label = ttk.Label(self.right_frame, text=stats_text, justify=tk.LEFT)
         self.stats_label.pack(side=tk.BOTTOM, anchor=tk.W, padx=5, pady=5)
 
-    def edit_value(self, item: str | int=None):
+    def edit_value(self, item: str | int = None):
         if item:
             selected_item = item
         else:
             selected_item = self.table.selection()
+            if selected_item:
+                selected_item = selected_item[0]
         if selected_item:
             item_values = self.table.item(selected_item)['values']
             key = item_values[0]
@@ -228,6 +260,78 @@ class LocalizationEditor(tk.Tk):
                 entry.grid(row=i + 1, column=1, sticky='w')
                 entries[locale] = entry
 
+            # AI localization generation options
+            row_offset = len(locales) + 1
+
+            # Separator
+            ttk.Separator(editor).grid(row=row_offset, column=0, columnspan=3, pady=10)
+
+            # Use custom phrase checkbox
+            use_custom_phrase_var = tk.BooleanVar()
+            use_custom_phrase_check = ttk.Checkbutton(editor, text="Use custom phrase for generation",
+                                                      variable=use_custom_phrase_var)
+            use_custom_phrase_check.grid(row=row_offset + 1, column=0, sticky='w')
+
+            # Custom phrase entry
+            ttk.Label(editor, text="Custom Phrase:").grid(row=row_offset + 2, column=0, sticky='w')
+            custom_phrase_entry = ttk.Entry(editor, width=50, state='disabled')
+            custom_phrase_entry.grid(row=row_offset + 2, column=1, sticky='w')
+
+            # Enable/Disable custom phrase entry based on checkbox
+            def toggle_custom_phrase(*args):
+                state = 'normal' if use_custom_phrase_var.get() else 'disabled'
+                custom_phrase_entry.config(state=state)
+
+            use_custom_phrase_var.trace('w', toggle_custom_phrase)
+
+            # Context entry
+            ttk.Label(editor, text="Context (optional):").grid(row=row_offset + 3, column=0, sticky='w')
+            context_entry = ttk.Entry(editor, width=50)
+            context_entry.grid(row=row_offset + 3, column=1, sticky='w')
+
+            # Generation locale
+            ttk.Label(editor, text="Generation Locale:").grid(row=row_offset + 4, column=0, sticky='w')
+            gen_locale_entry = ttk.Entry(editor, width=10)
+            gen_locale_entry.insert(0, 'en')
+            gen_locale_entry.grid(row=row_offset + 4, column=1, sticky='w')
+
+            # Overwrite existing values checkbox
+            overwrite_var = tk.BooleanVar(value=False)
+            overwrite_check = ttk.Checkbutton(editor, text="Overwrite existing values", variable=overwrite_var)
+            overwrite_check.grid(row=row_offset + 5, column=0, sticky='w')
+
+            # Generate Translations button
+            def generate_translations():
+                phrase = custom_phrase_entry.get() if use_custom_phrase_var.get() else key_entry.get()
+                context = context_entry.get()
+                gen_locale = gen_locale_entry.get()
+
+                # Ensure OpenAI API key is set
+                openai.api_key = os.environ.get('OPENAI_API_KEY')
+                if not openai.api_key:
+                    messagebox.showerror("API Key Missing", "Please set the OPENAI_API_KEY environment variable.")
+                    return
+
+                # Call the AI localization function
+                try:
+                    generated_translations = generate_localization_object(
+                        phrase=phrase,
+                        phrase_locale=gen_locale,
+                        context=context if context else None
+                    )
+                    # Update the entries with generated translations
+                    for locale in entries:
+                        if (overwrite_var.get() or not entries[locale].get()):
+                            entries[locale].delete(0, tk.END)
+                            entries[locale].insert(0, generated_translations.get(locale, ''))
+                    messagebox.showinfo("Success", "Translations generated successfully.")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to generate translations:\n{e}")
+
+            gen_button = ttk.Button(editor, text="Generate Translations", command=generate_translations)
+            gen_button.grid(row=row_offset + 6, column=0, columnspan=3, pady=5)
+
+            # Save function
             def save():
                 new_key = key_entry.get()
                 file_name = self.tree.item(self.tree.selection()[0])['text']
@@ -245,9 +349,10 @@ class LocalizationEditor(tk.Tk):
                 editor.destroy()
                 self.populate_table(file_name)
 
-            ttk.Button(editor, text="Save", command=save).grid(row=len(locales) + 1, column=0, columnspan=3)
+            ttk.Button(editor, text="Save", command=save).grid(row=row_offset + 7, column=0, columnspan=3, pady=10)
         else:
             messagebox.showwarning("No selection", "Please select a key to edit.")
+
 
     def add_file(self):
         new_file = tk.simpledialog.askstring("Add File", "Enter new JSON file name (with .json):")
@@ -301,23 +406,57 @@ class LocalizationEditor(tk.Tk):
             column = self.table.identify_column(event.x)
             row = self.table.identify_row(event.y)
 
-            # Reset all cells to their default state
-            for child in self.table.get_children():
-                tags = self.table.item(child, "tags")
-                self.table.item(child, tags=['row'] + [tag for tag in tags if tag.startswith('empty_')])
+            # Reset the background of all rows
+            for item in self.table.get_children():
+                self.table.item(item, tags=('row',))
 
-            # Highlight the current cell if it's empty
+            # Highlight the current row if the cell is empty
             col_index = int(column[1:]) - 1  # Convert column id to index
             cell_value = self.table.item(row, 'values')[col_index]
             if not cell_value:
-                current_tags = self.table.item(row, "tags")
-                self.table.item(row, tags=current_tags + ['highlight'])
+                self.table.item(row, tags=('row', 'highlight'))
 
-        self.table.tag_configure('highlight', background='#FFA500')  # Brighter yellow for hover
+            # Configure styles
+            self.table.tag_configure('row', background='white')
+            self.table.tag_configure('highlight', background='#FFA500')  # Brighter yellow for hover
 
     def on_table_configure(self, event):
         self.table.unbind('<Motion>')
         self.table.after(100, lambda: self.table.bind('<Motion>', self.highlight_cell))
+
+    def on_key_press(self, event):
+        selected = self.table.selection()
+        if not selected:
+            # If no selection, select the first item
+            items = self.table.get_children()
+            if items:
+                self.table.selection_set(items[0])
+        else:
+            index = self.table.index(selected[0])
+            if event.keysym == 'Up':
+                if index > 0:
+                    self.table.selection_set(self.table.get_children()[index - 1])
+            elif event.keysym == 'Down':
+                if index < len(self.table.get_children()) - 1:
+                    self.table.selection_set(self.table.get_children()[index + 1])
+        self.table.focus(self.table.selection())
+
+    def show_tree_context_menu(self, event):
+        selected_item = self.tree.identify_row(event.y)
+        self.tree.selection_set(selected_item)
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="Add File", command=self.add_file)
+        menu.add_command(label="Add Key to File", command=self.add_key)
+        menu.post(event.x_root, event.y_root)
+
+    def show_table_context_menu(self, event):
+        selected_item = self.table.identify_row(event.y)
+        self.table.selection_set(selected_item)
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="Edit Value", command=self.edit_value)
+        menu.post(event.x_root, event.y_root)
+
+
 
 
 if __name__ == "__main__":

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "localization-Editor"
+version = "0.1.0"
+description = "A GUI-based localization editor, primarily intended for the MSF AI Assistant"
+authors = [
+    { name = "Blaze Burgess", email = "" }
+]
+readme = "README.md"
+requires-python = ">=3.7"
+keywords = ["localization", "translation", "GUI", "OpenAI"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "openai==1.52.0",
+    "pydantic==2.9.2",
+    "tqdm==4.66.5",
+    "annotated-types==0.7.0",
+    "anyio==4.6.2.post1",
+    "certifi==2024.8.30",
+    "distro==1.9.0",
+    "h11==0.14.0",
+    "httpcore==1.0.6",
+    "httpx==0.27.2",
+    "idna==3.10",
+    "jiter==0.6.1",
+    "sniffio==1.3.1",
+    "typing_extensions==4.12.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "flake8",
+    "black",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests*"]

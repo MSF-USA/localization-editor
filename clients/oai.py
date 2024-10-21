@@ -53,9 +53,9 @@ def generate_localization_object(
         user: Optional[Dict[str, Any]] = None
 ) -> Dict[str, str]:
     iso_codes = [
-        'ar', 'bn', 'ca', 'de', 'en', 'es', 'fi', 'fr', 'he', 'id',
-        'it', 'ja', 'ko', 'pl', 'pt', 'ro', 'ru', 'si', 'sv', 'te',
-        'tr', 'vi', 'zh'
+        'am', 'ar', 'bn', 'ca', 'cs', 'de', 'en', 'es', 'fa', 'fi', 'fr', 'he', 'id',
+        'it', 'ja', 'ko', 'nl', 'pl', 'pt', 'ro', 'ru', 'si', 'sw', 'sv', 'te', 'th',
+        'tr', 'uk', 'vi', 'zh'
     ]
     target_languages = iso_codes.copy()
     if phrase_locale in target_languages:
